@@ -15,6 +15,7 @@ AVLNode* avl_create_node(Station* station);
 AVLNode* avl_insert(AVLNode* root, Station* station);
 void avl_destroy(AVLNode* root);
 int avl_height(AVLNode* node);
+void avl_inorder(AVLNode* root, void (*process)(Station*, void*), void* user_data);
 void avl_print_inorder(AVLNode* root);
 
 #endif

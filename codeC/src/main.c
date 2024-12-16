@@ -7,43 +7,44 @@
 #include "stats.h"
 
 int main(int argc, char *argv[]) {
-	if (argc != 2) {
-		fprintf(stderr, "Usage: %s <fichier_csv>\n", argv[0]);
-		return 1;
-	}
+    if (argc != 3) {
+        fprintf(stderr, "Usage: %s <fichier_csv_entree> <fichier_csv_sortie>\n", argv[0]);
+        return 1;
+    }
 
-	// Création de l'arbre AVL à partir du fichier CSV
-	AVLNode* root = parse_csv_file(argv[1]);
-	if (!root) {
-		fprintf(stderr, "Erreur lors du parsing du fichier\n");
-		return 2;
-	}
+    const char* input_file = argv[1];
+    const char* output_file = argv[2];
 
-	// Calcul des statistiques
-	StatsData* stats = stats_create();
-	if (!stats) {
-		avl_destroy(root);
-		return 3;
-	}
+AVLNode* root = parse_csv_file(input_file);
+if (!root) {
+    // Aucune donnée trouvée, on crée un fichier avec juste l'en-tête.
+    StatsData* empty_stats = stats_create();
+    if (empty_stats) {
+        stats_write_to_file(empty_stats, output_file); 
+        stats_destroy(empty_stats);
+    }
+    fprintf(stderr, "Aucune donnée correspondante - fichier vide créé.\n");
+    return 0; // pas d'erreur, juste pas de données
+}
 
-	stats_compute(stats, root);
+    // Calcul des stats
+    StatsData* stats = stats_create();
+    if (!stats) {
+        avl_destroy(root);
+        return 3;
+    }
 
-	// Génération des fichiers de sortie
-	stats_write_to_file(stats, argv[1]);
+    stats_compute(stats, root);
 
-	// Si c'est un fichier lv_all, générer aussi le fichier minmax
-	if (strstr(argv[1], "lv_all") != NULL) {
-		char minmax_filename[256];
-		snprintf(minmax_filename, sizeof(minmax_filename), "%s_minmax.csv", argv[1]);
-		stats_write_minmax_file(stats, minmax_filename);
-	}
+    // Écriture des résultats dans le fichier de sortie
+    stats_write_to_file(stats, output_file);
 
-	// Affichage du résumé
-	stats_print_summary(stats);
+    // Affichage du résumé
+    stats_print_summary(stats);
 
-	// Libération de la mémoire
-	stats_destroy(stats);
-	avl_destroy(root);
+    // Libération
+    stats_destroy(stats);
+    avl_destroy(root);
 
-	return 0;
+    return 0;
 }

@@ -2,112 +2,136 @@
 #include <stdlib.h>
 #include <string.h>
 #include "parser.h"
+#include "avl.h"
+#include "station.h"
 
 #define MAX_LINE_LENGTH 1024
 #define INPUT_DELIMITER ":"
 
-// Fonction utilitaire pour nettoyer une chaîne
 static void trim(char* str) {
-	if (!str) return;
-	char* start = str;
-	while (*start == ' ' || *start == '\t') start++;
-	if (start != str) memmove(str, start, strlen(start) + 1);
+    if (!str) return;
+    char* start = str;
+    while (*start == ' ' || *start == '\t') start++;
+    if (start != str) memmove(str, start, strlen(start) + 1);
 
-	char* end = str + strlen(str) - 1;
-	while (end > str && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) end--;
-	*(end + 1) = '\0';
+    char* end = str + strlen(str) - 1;
+    while (end > str && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) end--;
+    *(end + 1) = '\0';
 }
 
 char** split_line(char* line, const char* delimiter, int* count) {
-	*count = 0;
-	char** tokens = NULL;
+    *count = 0;
+    char** tokens = NULL;
 
-	char* token = strtok(line, delimiter);
-	while (token) {
-		tokens = realloc(tokens, (*count + 1) * sizeof(char*));
-		if (!tokens) return NULL;
+    char* token = strtok(line, delimiter);
+    while (token) {
+        tokens = realloc(tokens, (*count + 1) * sizeof(char*));
+        if (!tokens) return NULL;
 
-		trim(token);
-		tokens[*count] = strdup(token);
-		if (!tokens[*count]) {
-			free_split_result(tokens, *count);
-			return NULL;
-		}
+        trim(token);
+        tokens[*count] = strdup(token);
+        if (!tokens[*count]) {
+            free_split_result(tokens, *count);
+            return NULL;
+        }
 
-		(*count)++;
-		token = strtok(NULL, delimiter);
-	}
+        (*count)++;
+        token = strtok(NULL, delimiter);
+    }
 
-	return tokens;
+    return tokens;
 }
 
 void free_split_result(char** tokens, int count) {
-	if (tokens) {
-		for (int i = 0; i < count; i++) {
-			free(tokens[i]);
-		}
-		free(tokens);
-	}
+    if (tokens) {
+        for (int i = 0; i < count; i++) {
+            free(tokens[i]);
+        }
+        free(tokens);
+    }
 }
 
 AVLNode* parse_csv_file(const char* filename) {
-	FILE* file = fopen(filename, "r");
-	if (!file) {
-		fprintf(stderr, "Erreur: Impossible d'ouvrir le fichier %s\n", filename);
-		return NULL;
-	}
+    FILE* file = fopen(filename, "r");
+    if (!file) {
+        fprintf(stderr, "Erreur: Impossible d'ouvrir le fichier %s\n", filename);
+        return NULL;
+    }
 
-	char line[MAX_LINE_LENGTH];
-	AVLNode* root = NULL;
-	int line_count = 0;
-	int header_processed = 0;
+    char line[MAX_LINE_LENGTH];
+    AVLNode* root = NULL;
+    int line_count = 0;
+    int header_processed = 0;
 
-	while (fgets(line, sizeof(line), file)) {
-		line_count++;
+    while (fgets(line, sizeof(line), file)) {
+        line_count++;
 
-		// Ignorer la ligne d'en-tête
-		if (!header_processed) {
-			header_processed = 1;
-			continue;
-		}
+        // Suppression du \n
+        line[strcspn(line, "\n")] = 0;
 
-		// Supprimer le retour à la ligne
-		line[strcspn(line, "\n")] = 0;
+        // Première ligne = en-tête
+        if (!header_processed) {
+            header_processed = 1;
+            // On attend "Station:Capacité:Consommation"
+            if (strcmp(line, "Station:Capacité:Consommation") != 0) {
+                fprintf(stderr, "Erreur: En-tête invalide. Attendu: Station:Capacité:Consommation\n");
+                fclose(file);
+                return NULL;
+            }
+            continue;
+        }
 
-		int token_count;
-		char** tokens = split_line(line, INPUT_DELIMITER, &token_count);
+        int token_count;
+        char* line_copy = strdup(line);
+        char** tokens = split_line(line_copy, INPUT_DELIMITER, &token_count);
+        if (!tokens) {
+            fprintf(stderr, "Erreur: Échec du split à la ligne %d\n", line_count);
+            free(line_copy);
+            continue;
+        }
 
-		if (tokens && token_count >= 3) {
-			// Conversion des valeurs avec vérification
-			char* endptr;
-			double capacity = strtod(tokens[1], &endptr);
-			if (*endptr != '\0') {
-				fprintf(stderr, "Erreur: Capacité invalide à la ligne %d\n", line_count);
-				free_split_result(tokens, token_count);
-				continue;
-			}
+        if (token_count != 3) {
+            fprintf(stderr, "Erreur: Ligne %d: nombre de champs incorrect (%d, attendu 3)\n", line_count, token_count);
+            free_split_result(tokens, token_count);
+            free(line_copy);
+            continue;
+        }
 
-			double consumption = strtod(tokens[2], &endptr);
-			if (*endptr != '\0') {
-				fprintf(stderr, "Erreur: Consommation invalide à la ligne %d\n", line_count);
-				free_split_result(tokens, token_count);
-				continue;
-			}
+        char* id = tokens[0];
+        char* cap_str = tokens[1];
+        char* cons_str = tokens[2];
 
-			// Création et insertion de la station
-			Station* station = station_create(tokens[0], capacity, consumption);
-			if (station) {
-				root = avl_insert(root, station);
-				if (!root) {
-					fprintf(stderr, "Erreur: Échec de l'insertion dans l'AVL\n");
-					station_destroy(station);
-				}
-			}
-		}
+        char* endptr;
+        double capacity = strtod(cap_str, &endptr);
+        if (*endptr != '\0') {
+            fprintf(stderr, "Erreur: Capacité invalide à la ligne %d\n", line_count);
+            free_split_result(tokens, token_count);
+            free(line_copy);
+            continue;
+        }
 
-		free_split_result(tokens, token_count);
-	}
+        double consumption = strtod(cons_str, &endptr);
+        if (*endptr != '\0') {
+            fprintf(stderr, "Erreur: Consommation invalide à la ligne %d\n", line_count);
+            free_split_result(tokens, token_count);
+            free(line_copy);
+            continue;
+        }
 
-	fclose(file);
-	return root;
+        Station* station = station_create(id, capacity, consumption);
+        if (!station) {
+            fprintf(stderr, "Erreur: Échec de création de station à la ligne %d\n", line_count);
+            free_split_result(tokens, token_count);
+            free(line_copy);
+            continue;
+        }
+
+        root = avl_insert(root, station);
+
+        free_split_result(tokens, token_count);
+        free(line_copy);
+    }
+
+    fclose(file);
+    return root;
 }

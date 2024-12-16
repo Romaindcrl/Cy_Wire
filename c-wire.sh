@@ -1,21 +1,25 @@
 #!/bin/bash
 
+#####################################
 # Fonction d'affichage de l'aide
+#####################################
 display_help() {
     echo "Usage: $0 <chemin_fichier> <type_station> <type_consommateur> [identifiant_centrale] [-h]"
     echo
     echo "Arguments obligatoires:"
-    echo "  chemin_fichier       : Chemin vers le fichier CSV d'entrée"
+    echo "  chemin_fichier       : Chemin vers le fichier CSV d'entrée (Ex: input/input.csv)"
     echo "  type_station         : hvb, hva, ou lv"
     echo "  type_consommateur    : comp, indiv, ou all"
     echo
     echo "Arguments optionnels:"
     echo "  identifiant_centrale : Numéro de la centrale à analyser"
     echo "  -h                   : Affiche cette aide"
-    exit 1
+    exit 0
 }
 
+#####################################
 # Fonction de validation des paramètres
+#####################################
 validate_params() {
     local station=$1
     local consumer=$2
@@ -25,57 +29,72 @@ validate_params() {
             ;;
         *)
             echo "Erreur: Type de consommateur invalide. Valeurs acceptées : comp, indiv, all"
-            exit 1
+            display_help
             ;;
     esac
 
+    # Interdictions décrites dans l'énoncé
     if [[ "$station" == "hvb" && ("$consumer" == "all" || "$consumer" == "indiv") ]]; then
         echo "Erreur: Combinaison interdite - hvb ne peut pas être utilisé avec all ou indiv"
-        exit 1
+        display_help
     fi
 
     if [[ "$station" == "hva" && ("$consumer" == "all" || "$consumer" == "indiv") ]]; then
         echo "Erreur: Combinaison interdite - hva ne peut pas être utilisé avec all ou indiv"
-        exit 1
+        display_help
     fi
 }
 
-# Vérification de l'option d'aide
+#####################################
+# Vérification option d'aide
+#####################################
 for arg in "$@"; do
     if [ "$arg" == "-h" ]; then
         display_help
     fi
 done
 
+#####################################
 # Vérification du nombre d'arguments
+#####################################
 if [ $# -lt 3 ]; then
     echo "Erreur: Nombre d'arguments insuffisant"
     display_help
 fi
 
+#####################################
 # Récupération des arguments
+#####################################
 input_file=$1
 station_type=$2
 consumer_type=$3
 power_plant_id=${4:-""}
 
+#####################################
 # Validation des paramètres
+#####################################
 validate_params "$station_type" "$consumer_type"
 
+#####################################
 # Vérification de l'existence du fichier d'entrée
+#####################################
 if [ ! -f "$input_file" ]; then
     echo "Erreur: Le fichier $input_file n'existe pas"
     exit 1
 fi
 
-# Création des dossiers nécessaires
+#####################################
+# Création des dossiers nécessaires et nettoyage
+#####################################
+mkdir -p tmp
+mkdir -p graphs
+rm -rf tmp/*
 mkdir -p tmp/filtered_data
 mkdir -p graphs/consumption_stats
 
-# Nettoyage du dossier tmp
-rm -rf tmp/filtered_data/*
-
+#####################################
 # Compilation du programme C si nécessaire
+#####################################
 if [ ! -f "codeC/bin/c-wire" ]; then
     cd codeC
     make clean
@@ -87,119 +106,209 @@ if [ ! -f "codeC/bin/c-wire" ]; then
     cd ..
 fi
 
+#####################################
 # Début du chronomètre
+#####################################
 start_time=$(date +%s.%N)
 
-# Définition du fichier de sortie
-output_file="tmp/filtered_data/${station_type}_${consumer_type}${power_plant_id:+_}${power_plant_id}.csv"
+#####################################
+# FILTRAGE DES DONNÉES BRUTES
+#####################################
+raw_input="tmp/filtered_data/raw_input_for_c.csv"
+echo "PowerPlant;HVB;HVA;LV;Company;Individual;Capacity;Load" > "$raw_input"
 
-# Filtrage des données selon les paramètres
-case $station_type in
-    "hvb")
-        awk -F';' '
-        BEGIN { OFS=":"; print "Station:Capacité:Consommation" }
-        {
-            if (NR > 1 && $2 != "-") {
-                station = $2
-                if ($7 != "-") capacities[station] = $7
-                if ($8 != "-") consumptions[station] = $8
-            }
+awk -F';' -v st="$station_type" -v ct="$consumer_type" -v ppid="$power_plant_id" '
+BEGIN {}
+NR>1 {
+    # Filtre par identifiant de centrale si ppid non vide
+    if (ppid != "" && $1 != ppid) {
+        next
+    }
+
+    # Filtrage selon les règles
+    if (st=="hvb" && ct=="comp") {
+        if ($2 != "-" && $7 != "-") { print $0 }
+        else if ($2 != "-" && $5 != "-" && $8 != "-") { print $0 }
+    }
+
+    else if (st=="hva" && ct=="comp") {
+        if ($3 != "-" && $7 != "-") { print $0 }
+        else if ($3 != "-" && $5 != "-" && $8 != "-") { print $0 }
+    }
+
+    else if (st=="lv" && ct=="comp") {
+        if ($4 != "-" && $7 != "-") { print $0 }
+        else if ($4 != "-" && $5 != "-" && $8 != "-") { print $0 }
+    }
+
+    else if (st=="lv" && ct=="indiv") {
+        if ($4 != "-" && $7 != "-") { print $0 }
+        else if ($4 != "-" && $6 != "-" && $8 != "-") { print $0 }
+    }
+
+    else if (st=="lv" && ct=="all") {
+        if ($4 != "-" && $7 != "-") { print $0 }
+        else if ($4 != "-" && $8 != "-") { print $0 }
+    }
+}' "$input_file" >> "$raw_input"
+
+#####################################
+# CONVERSION EN FORMAT 3 COLONNES
+# Station:Capacité:Consommation
+#####################################
+final_input_for_c="tmp/filtered_data/result_for_c.csv"
+echo "Station:Capacité:Consommation" > "$final_input_for_c"
+
+awk -F';' -v st="$station_type" -v ct="$consumer_type" '
+NR>1 {
+    id = "-"
+    cap = 0
+    cons = 0
+
+    if (st=="hvb" && ct=="comp") {
+        if ($2 != "-" && $5 == "-") {
+            id = $2
+            cap = ($7=="-"?0:$7)
+            cons = 0
+        } else if ($2 != "-" && $5 != "-") {
+            id = $5
+            cap = 0
+            cons = ($8=="-"?0:$8)
         }
-        END {
-            for (station in capacities) {
-                print station, capacities[station], consumptions[station]
-            }
-        }' "$input_file" > "$output_file"
-        ;;
-    "hva")
-        awk -F';' '
-        BEGIN { OFS=":"; print "Station:Capacité:Consommation" }
-        {
-            if (NR > 1 && $3 != "-") {
-                station = $3
-                if ($7 != "-") capacities[station] = $7
-                if ($8 != "-") consumptions[station] = $8
-            }
+    }
+
+    else if (st=="hva" && ct=="comp") {
+        if ($3 != "-" && $5 == "-") {
+            id = $3
+            cap = ($7=="-"?0:$7)
+            cons = 0
+        } else if ($3 != "-" && $5 != "-") {
+            id = $5
+            cap = 0
+            cons = ($8=="-"?0:$8)
         }
-        END {
-            for (station in capacities) {
-                print station, capacities[station], consumptions[station]
-            }
-        }' "$input_file" > "$output_file"
-        ;;
-    "lv")
-        awk -F';' '
-        BEGIN { OFS=":"; print "Station:Capacité:Consommation" }
-        {
-            if (NR > 1 && $4 != "-") {
-                station = $4
-                if ($7 != "-") capacities[station] = $7
-                if ($8 != "-") consumptions[station] += $8
-            }
+    }
+
+    else if (st=="lv" && ct=="comp") {
+        if ($4 != "-" && $5=="-" && $6=="-") {
+            id = $4
+            cap = ($7=="-"?0:$7)
+            cons = 0
+        } else if ($4 != "-" && $5 != "-") {
+            id = $5
+            cap = 0
+            cons = ($8=="-"?0:$8)
         }
-        END {
-            for (station in capacities) {
-                print station, capacities[station], consumptions[station]
-            }
-        }' "$input_file" > "$output_file"
-        ;;
-    *)
-        echo "Erreur: Type de station invalide"
-        display_help
-        ;;
-esac
+    }
 
-# Gestion des 10 stations les plus et les moins chargées
-minmax_file="tmp/filtered_data/${station_type}_${consumer_type}_minmax.csv"
-echo "Station:Capacité:Consommation" > "$minmax_file"
+    else if (st=="lv" && ct=="indiv") {
+        if ($4 != "-" && $5=="-" && $6=="-") {
+            id = $4
+            cap = ($7=="-"?0:$7)
+            cons = 0
+        } else if ($4 != "-" && $6 != "-") {
+            id = $6
+            cap = 0
+            cons = ($8=="-"?0:$8)
+        }
+    }
 
-# Top 10 stations avec la consommation la plus élevée
-sort -t: -k3,3nr "$output_file" | head -n 10 >> "$minmax_file"
+    else if (st=="lv" && ct=="all") {
+        if ($4 != "-" && $5=="-" && $6=="-") {
+            id = $4
+            cap = ($7=="-"?0:$7)
+            cons = 0
+        } else if ($4 != "-" && $8 != "-") {
+            if ($5 != "-") { id=$5 } else { id=$6 }
+            cap = 0
+            cons = ($8=="-"?0:$8)
+        }
+    }
 
-# Bottom 10 stations avec la consommation la plus faible
-sort -t: -k3,3n "$output_file" | head -n 10 >> "$minmax_file"
+    if (id != "-") {
+        print id ":" cap ":" cons
+    }
+}' "$raw_input" >> "$final_input_for_c"
 
-# Mettre à jour le fichier de sortie pour le graphique
-output_file="$minmax_file"
-
-# Vérification que le fichier filtré a été créé
-if [ ! -f "$output_file" ]; then
-    echo "Erreur: Le fichier filtré n'a pas été créé"
+#####################################
+# Appel du programme C
+#####################################
+./codeC/bin/c-wire "$final_input_for_c" "tmp/filtered_data/result_c.csv"
+if [ $? -ne 0 ]; then
+    echo "Erreur: Le programme C a échoué"
+    end_time=$(date +%s.%N)
+    execution_time=$(echo "$end_time - $start_time" | bc)
+    echo "Temps d'exécution: ${execution_time}sec"
     exit 1
 fi
 
-# Appel du programme C
-./codeC/bin/c-wire "$output_file"
+if [ ! -f "tmp/filtered_data/result_c.csv" ]; then
+    echo "Erreur: Le programme C n a pas créé le fichier result_c.csv"
+    end_time=$(date +%s.%N)
+    execution_time=$(echo "$end_time - $start_time" | bc)
+    echo "Temps d'exécution: ${execution_time}sec"
+    exit 1
+fi
 
-# Génération des graphiques avec GnuPlot
-if command -v gnuplot >/dev/null 2>&1; then
-    graph_file="graphs/consumption_stats/consumption_graph_${station_type}_${consumer_type}.png"
-    echo "Génération du graphique : $graph_file"
+#####################################
+# Renommage du fichier final
+#####################################
+final_file="tmp/filtered_data/${station_type}_${consumer_type}"
+if [ -n "$power_plant_id" ]; then
+    final_file="${final_file}_${power_plant_id}"
+fi
+final_file="${final_file}.csv"
 
+mv tmp/filtered_data/result_c.csv "$final_file"
+
+#####################################
+# Si lv all, création du lv_all_minmax.csv et du graphique
+#####################################
+if [ "$station_type" == "lv" ] && [ "$consumer_type" == "all" ]; then
+    minmax_file="tmp/filtered_data/lv_all_minmax.csv"
+    echo "Station:Capacité:Consommation:Difference(Capacity-Consumption)" > "$minmax_file"
+
+    awk -F':' 'NR>1 {
+        diff = $2 - $3
+        print $1":"$2":"$3":"diff
+    }' "$final_file" > tmp/filtered_data/diff.csv
+
+    head_10=$(sort -t: -k4,4n tmp/filtered_data/diff.csv | head -n 10)
+    tail_10=$(sort -t: -k4,4n tmp/filtered_data/diff.csv | tail -n 10)
+
+    echo "$head_10" >> "$minmax_file"
+    echo "$tail_10" >> "$minmax_file"
+
+    # Génération du script GnuPlot
     cat > graphs/consumption_stats/plot_script.gnu << EOF
 set terminal png size 1200,800
-set output "$graph_file"
+set output "graphs/consumption_stats/consumption_graph_lv_all.png"
 set style data histograms
 set style fill solid 0.8 border -1
 set boxwidth 0.7
-set title "Consommation et Capacité (${station_type} - ${consumer_type})"
+set title "Les 10 postes LV plus chargés et les 10 moins chargés (lv - all)"
 set xlabel "Stations"
 set ylabel "Énergie (kWh)"
 set grid ytics
 set xtics rotate by -45
 set datafile separator ":"
 
-# Tracer les données
-plot "$output_file" using 2:xtic(1) title "Capacité (kWh)" lc rgb "blue", \
-     "$output_file" using 3 title "Consommation (kWh)" lc rgb "orange"
+plot "tmp/filtered_data/lv_all_minmax.csv" using 2:xtic(1) title "Capacité (kWh)" lc rgb "blue", \
+     "tmp/filtered_data/lv_all_minmax.csv" using 3 title "Consommation (kWh)" lc rgb "orange"
 EOF
 
-    gnuplot graphs/consumption_stats/plot_script.gnu
-else
-    echo "Erreur: GnuPlot n'est pas installé."
+    # Appel de GnuPlot
+    if command -v gnuplot >/dev/null 2>&1; then
+        gnuplot graphs/consumption_stats/plot_script.gnu
+    else
+        echo "GnuPlot n'est pas installé. Aucun graphique ne sera généré."
+    fi
 fi
 
+#####################################
 # Fin du chronomètre
+#####################################
 end_time=$(date +%s.%N)
 execution_time=$(echo "$end_time - $start_time" | bc)
 echo "Temps d'exécution: ${execution_time}sec"
+exit 0
