@@ -60,13 +60,23 @@ AVLNode *avl_insert(AVLNode *root, Station *station) {
     return avl_create_node(station);
 
   int cmp = station_compare(station, root->station);
-  if (cmp < 0)
+  if (cmp < 0) {
     root->left = avl_insert(root->left, station);
-  else if (cmp > 0)
+  } else if (cmp > 0) {
     root->right = avl_insert(root->right, station);
-  else {
-    // Station déjà présente (même capacité/ID), on ne l'insère pas.
-    // Selon les besoins, on pourrait gérer différemment.
+  } else {
+    // Station déjà présente (même ID)
+    // On met à jour les données de la station existante.
+    // Par exemple, on additionne la consommation.
+    root->station->consumption += station->consumption;
+
+    // Si la capacité est définie uniquement à la création de la station,
+    // vous pouvez ignorer la mise à jour de la capacité ou vérifier s'il y a
+    // une nouvelle info. root->station->capacity = (root->station->capacity ==
+    // 0) ? station->capacity : root->station->capacity;
+
+    // On libère la station en trop, car on ne l'insère pas
+    station_destroy(station);
     return root;
   }
 
@@ -74,21 +84,18 @@ AVLNode *avl_insert(AVLNode *root, Station *station) {
 
   int balance = get_balance(root);
 
-  // Cas Left Left
+  // Cas d’équilibrage identiques à avant
   if (balance > 1 && station_compare(station, root->left->station) < 0)
     return right_rotate(root);
 
-  // Cas Right Right
   if (balance < -1 && station_compare(station, root->right->station) > 0)
     return left_rotate(root);
 
-  // Cas Left Right
   if (balance > 1 && station_compare(station, root->left->station) > 0) {
     root->left = left_rotate(root->left);
     return right_rotate(root);
   }
 
-  // Cas Right Left
   if (balance < -1 && station_compare(station, root->right->station) < 0) {
     root->right = right_rotate(root->right);
     return left_rotate(root);

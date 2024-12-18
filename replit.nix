@@ -1,5 +1,5 @@
 {pkgs}: {
   deps = [
-    pkgs.emacsPackages.gnuplot
+    pkgs.gnuplot
   ];
 }

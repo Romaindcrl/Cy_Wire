@@ -1,6 +1,7 @@
 #include "../include/stats.h"
 #include "../include/avl.h"
 #include "../include/station.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,8 +46,8 @@ static int station_compare_qsort(const void *a, const void *b) {
 static int station_compare_by_diff(const void *a, const void *b) {
   Station *s1 = *(Station **)a;
   Station *s2 = *(Station **)b;
-  double diff1 = s1->capacity - s1->consumption;
-  double diff2 = s2->capacity - s2->consumption;
+  double diff1 = fabs(s1->capacity - s1->consumption);
+  double diff2 = fabs(s2->capacity - s2->consumption);
   if (diff1 < diff2)
     return -1;
   if (diff1 > diff2)

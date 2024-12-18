@@ -27,11 +27,6 @@ void station_destroy(Station *station) {
 }
 
 int station_compare(const Station *s1, const Station *s2) {
-  if (s1->capacity < s2->capacity)
-    return -1;
-  if (s1->capacity > s2->capacity)
-    return 1;
-  // Si capacités égales, on compare par l'ID pour un ordre déterministe
   return strcmp(s1->id, s2->id);
 }
 
