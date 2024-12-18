@@ -1,52 +1,37 @@
 #!/bin/bash
 
 #####################################
-# Fonction d'affichage de l'aide
+# Affichage de l'aide
 #####################################
 display_help() {
     echo "Usage: $0 <chemin_fichier> <type_station> <type_consommateur> [identifiant_centrale] [-h]"
     echo
     echo "Arguments obligatoires:"
-    echo "  chemin_fichier       : Chemin vers le fichier CSV d'entrée (Ex: input/input.csv)"
+    echo "  chemin_fichier       : Chemin vers le fichier CSV d'entrée (Ex: input/data.csv)"
     echo "  type_station         : hvb, hva, ou lv"
     echo "  type_consommateur    : comp, indiv, ou all"
     echo
     echo "Arguments optionnels:"
     echo "  identifiant_centrale : Numéro de la centrale à analyser"
-    echo "  -h                   : Affiche cette aide"
+    echo "  -h                   : Affiche cette aide et ignore les autres paramètres"
+    echo
+    echo "Règles spécifiques:"
+    echo "  - hvb ne peut pas être utilisé avec all ou indiv"
+    echo "  - hva ne peut pas être utilisé avec all ou indiv"
+    echo
+    echo "Exemples:"
+    echo "  $0 input/data.csv hvb comp"
+    echo "  $0 input/data.csv lv all 2"
     exit 0
 }
 
 #####################################
-# Fonction de validation des paramètres
+# Début du chronomètre global (avant validation des paramètres)
 #####################################
-validate_params() {
-    local station=$1
-    local consumer=$2
-
-    case "$consumer" in
-        "comp"|"indiv"|"all")
-            ;;
-        *)
-            echo "Erreur: Type de consommateur invalide. Valeurs acceptées : comp, indiv, all"
-            display_help
-            ;;
-    esac
-
-    # Interdictions décrites dans l'énoncé
-    if [[ "$station" == "hvb" && ("$consumer" == "all" || "$consumer" == "indiv") ]]; then
-        echo "Erreur: Combinaison interdite - hvb ne peut pas être utilisé avec all ou indiv"
-        display_help
-    fi
-
-    if [[ "$station" == "hva" && ("$consumer" == "all" || "$consumer" == "indiv") ]]; then
-        echo "Erreur: Combinaison interdite - hva ne peut pas être utilisé avec all ou indiv"
-        display_help
-    fi
-}
+start_time=$(date +%s.%N)
 
 #####################################
-# Vérification option d'aide
+# Vérification option d'aide (prioritaire)
 #####################################
 for arg in "$@"; do
     if [ "$arg" == "-h" ]; then
@@ -71,8 +56,34 @@ consumer_type=$3
 power_plant_id=${4:-""}
 
 #####################################
-# Validation des paramètres
+# Fonction de validation des paramètres
 #####################################
+validate_params() {
+    local station=$1
+    local consumer=$2
+
+    # Vérification du type de consommateur
+    case "$consumer" in
+        "comp"|"indiv"|"all")
+            ;;
+        *)
+            echo "Erreur: Type de consommateur invalide ($consumer). Valeurs acceptées : comp, indiv, all"
+            display_help
+            ;;
+    esac
+
+    # Combinations interdites
+    if [[ "$station" == "hvb" && ("$consumer" == "all" || "$consumer" == "indiv") ]]; then
+        echo "Erreur: Combinaison interdite - hvb ne peut pas être utilisé avec all ou indiv"
+        display_help
+    fi
+
+    if [[ "$station" == "hva" && ("$consumer" == "all" || "$consumer" == "indiv") ]]; then
+        echo "Erreur: Combinaison interdite - hva ne peut pas être utilisé avec all ou indiv"
+        display_help
+    fi
+}
+
 validate_params "$station_type" "$consumer_type"
 
 #####################################
@@ -80,11 +91,13 @@ validate_params "$station_type" "$consumer_type"
 #####################################
 if [ ! -f "$input_file" ]; then
     echo "Erreur: Le fichier $input_file n'existe pas"
+    # Aucune donnée n'a été traitée, durée = 0.0
+    echo "Temps d'exécution: 0.0sec"
     exit 1
 fi
 
 #####################################
-# Création des dossiers nécessaires et nettoyage
+# Préparation des dossiers
 #####################################
 mkdir -p tmp
 mkdir -p graphs
@@ -96,20 +109,19 @@ mkdir -p graphs/consumption_stats
 # Compilation du programme C si nécessaire
 #####################################
 if [ ! -f "codeC/bin/c-wire" ]; then
-    cd codeC
-    make clean
-    make
+    (cd codeC && make clean && make)
     if [ $? -ne 0 ]; then
-        echo "Erreur de compilation"
+        echo "Erreur de compilation du programme C"
+        # Aucune donnée n'a été traitée, durée = 0.0
+        echo "Temps d'exécution: 0.0sec"
         exit 1
     fi
-    cd ..
 fi
 
 #####################################
-# Début du chronomètre
+# Début du traitement
 #####################################
-start_time=$(date +%s.%N)
+process_start_time=$(date +%s.%N)
 
 #####################################
 # FILTRAGE DES DONNÉES BRUTES
@@ -118,140 +130,136 @@ raw_input="tmp/filtered_data/raw_input_for_c.csv"
 echo "PowerPlant;HVB;HVA;LV;Company;Individual;Capacity;Load" > "$raw_input"
 
 awk -F';' -v st="$station_type" -v ct="$consumer_type" -v ppid="$power_plant_id" '
-BEGIN {}
-NR>1 {
-    # Filtre par identifiant de centrale si ppid non vide
+NR > 1 {
+    # Filtre par identifiant de centrale si spécifié
     if (ppid != "" && $1 != ppid) {
         next
     }
 
-    # Filtrage selon les règles
-    if (st=="hvb" && ct=="comp") {
-        if ($2 != "-" && $7 != "-") { print $0 }
-        else if ($2 != "-" && $5 != "-" && $8 != "-") { print $0 }
+    # Filtrage selon type de station et consommateur
+    if (st == "hvb" && ct == "comp") {
+        if (($2 != "-" && $5 == "-" && $6 == "-" && $7 != "-") || 
+            ($2 != "-" && $5 != "-" && $8 != "-")) {
+            print $0
+        }
+    } else if (st == "hva" && ct == "comp") {
+        if (($3 != "-" && $5 == "-" && $6 == "-" && $7 != "-") || 
+            ($3 != "-" && $5 != "-" && $8 != "-")) {
+            print $0
+        }
+    } else if (st == "lv" && ct == "comp") {
+        if (($4 != "-" && $5 == "-" && $6 == "-" && $7 != "-") || 
+            ($4 != "-" && $5 != "-" && $8 != "-")) {
+            print $0
+        }
+    } else if (st == "lv" && ct == "indiv") {
+        if (($4 != "-" && $5 == "-" && $6 == "-" && $7 != "-") || 
+            ($4 != "-" && $6 != "-" && $8 != "-")) {
+            print $0
+        }
+    } else if (st == "lv" && ct == "all") {
+        if (($4 != "-" && $5 == "-" && $6 == "-" && $7 != "-") || 
+            ($4 != "-" && $8 != "-")) {
+            print $0
+        }
     }
+}
+' "$input_file" >> "$raw_input"
 
-    else if (st=="hva" && ct=="comp") {
-        if ($3 != "-" && $7 != "-") { print $0 }
-        else if ($3 != "-" && $5 != "-" && $8 != "-") { print $0 }
-    }
-
-    else if (st=="lv" && ct=="comp") {
-        if ($4 != "-" && $7 != "-") { print $0 }
-        else if ($4 != "-" && $5 != "-" && $8 != "-") { print $0 }
-    }
-
-    else if (st=="lv" && ct=="indiv") {
-        if ($4 != "-" && $7 != "-") { print $0 }
-        else if ($4 != "-" && $6 != "-" && $8 != "-") { print $0 }
-    }
-
-    else if (st=="lv" && ct=="all") {
-        if ($4 != "-" && $7 != "-") { print $0 }
-        else if ($4 != "-" && $8 != "-") { print $0 }
-    }
-}' "$input_file" >> "$raw_input"
 
 #####################################
-# CONVERSION EN FORMAT 3 COLONNES
-# Station:Capacité:Consommation
+# Conversion en format pour le programme C
 #####################################
-final_input_for_c="tmp/filtered_data/result_for_c.csv"
+final_input_for_c="tmp/filtered_data/input_for_c.csv"
 echo "Station:Capacité:Consommation" > "$final_input_for_c"
 
 awk -F';' -v st="$station_type" -v ct="$consumer_type" '
 NR>1 {
-    id = "-"
-    cap = 0
+    station_id = "-"
+    capacity = 0
     cons = 0
 
-    if (st=="hvb" && ct=="comp") {
-        if ($2 != "-" && $5 == "-") {
-            id = $2
-            cap = ($7=="-"?0:$7)
+    if (st == "hvb" && ct == "comp") {
+        if ($2 != "-" && $5 == "-" && $6 == "-") {
+            station_id = $2
+            capacity = ($7 == "-" ? 0 : $7)
             cons = 0
-        } else if ($2 != "-" && $5 != "-") {
-            id = $5
-            cap = 0
-            cons = ($8=="-"?0:$8)
         }
-    }
-
-    else if (st=="hva" && ct=="comp") {
-        if ($3 != "-" && $5 == "-") {
-            id = $3
-            cap = ($7=="-"?0:$7)
+        else if ($2 != "-" && $5 != "-") {
+            station_id = $5
+            capacity = 0
+            cons = ($8 == "-" ? 0 : $8)
+        }
+    } else if (st=="hva" && ct=="comp") {
+        if ($3 != "-" && $5 == "-" && $6 == "-") {
+            station_id = $3
+            capacity = ($7=="-"?0:$7)
             cons = 0
         } else if ($3 != "-" && $5 != "-") {
-            id = $5
-            cap = 0
+            station_id = $5
+            capacity = 0
             cons = ($8=="-"?0:$8)
         }
-    }
-
-    else if (st=="lv" && ct=="comp") {
-        if ($4 != "-" && $5=="-" && $6=="-") {
-            id = $4
-            cap = ($7=="-"?0:$7)
+    } else if (st=="lv" && ct=="comp") {
+        if ($4 != "-" && $5=="-" && $6=="-" && $7 != "-") {
+            station_id = $4
+            capacity = ($7=="-"?0:$7)
             cons = 0
         } else if ($4 != "-" && $5 != "-") {
-            id = $5
-            cap = 0
+            station_id = $5
+            capacity = 0
             cons = ($8=="-"?0:$8)
         }
-    }
-
-    else if (st=="lv" && ct=="indiv") {
-        if ($4 != "-" && $5=="-" && $6=="-") {
-            id = $4
-            cap = ($7=="-"?0:$7)
+    } else if (st=="lv" && ct=="indiv") {
+        if ($4 != "-" && $5=="-" && $6=="-" && $7 != "-") {
+            station_id = $4
+            capacity = ($7=="-"?0:$7)
             cons = 0
         } else if ($4 != "-" && $6 != "-") {
-            id = $6
-            cap = 0
+            station_id = $6
+            capacity = 0
             cons = ($8=="-"?0:$8)
         }
-    }
-
-    else if (st=="lv" && ct=="all") {
-        if ($4 != "-" && $5=="-" && $6=="-") {
-            id = $4
-            cap = ($7=="-"?0:$7)
+    } else if (st=="lv" && ct=="all") {
+        if ($4 != "-" && $5=="-" && $6=="-" && $7 != "-") {
+            station_id = $4
+            capacity = ($7=="-"?0:$7)
             cons = 0
         } else if ($4 != "-" && $8 != "-") {
-            if ($5 != "-") { id=$5 } else { id=$6 }
-            cap = 0
+            station_id = ($5 != "-" ? $5 : $6)
+            capacity = 0
             cons = ($8=="-"?0:$8)
         }
     }
 
-    if (id != "-") {
-        print id ":" cap ":" cons
+    if (station_id != "-") {
+        print station_id ":" capacity ":" cons
     }
 }' "$raw_input" >> "$final_input_for_c"
 
 #####################################
-# Appel du programme C
+# Appel du programme C (envoi également station_type et consumer_type)
 #####################################
-./codeC/bin/c-wire "$final_input_for_c" "tmp/filtered_data/result_c.csv"
+./codeC/bin/c-wire "$final_input_for_c" "tmp/filtered_data/result_c.csv" "$station_type" "$consumer_type"
 if [ $? -ne 0 ]; then
     echo "Erreur: Le programme C a échoué"
+    # Afficher le temps écoulé
     end_time=$(date +%s.%N)
-    execution_time=$(echo "$end_time - $start_time" | bc)
+    execution_time=$(awk "BEGIN {print $end_time - $process_start_time}")
     echo "Temps d'exécution: ${execution_time}sec"
     exit 1
 fi
 
 if [ ! -f "tmp/filtered_data/result_c.csv" ]; then
-    echo "Erreur: Le programme C n a pas créé le fichier result_c.csv"
+    echo "Erreur: Le programme C n'a pas créé le fichier result_c.csv"
     end_time=$(date +%s.%N)
-    execution_time=$(echo "$end_time - $start_time" | bc)
+    execution_time=$(awk "BEGIN {print $end_time - $process_start_time}")
     echo "Temps d'exécution: ${execution_time}sec"
     exit 1
 fi
 
 #####################################
-# Renommage du fichier final
+# Trie le fichier par capacité croissante (colonne 2)
 #####################################
 final_file="tmp/filtered_data/${station_type}_${consumer_type}"
 if [ -n "$power_plant_id" ]; then
@@ -259,7 +267,10 @@ if [ -n "$power_plant_id" ]; then
 fi
 final_file="${final_file}.csv"
 
-mv tmp/filtered_data/result_c.csv "$final_file"
+header=$(head -n 1 tmp/filtered_data/result_c.csv)
+tail -n +2 tmp/filtered_data/result_c.csv | sort -t: -k2,2n > tmp/filtered_data/sorted.csv
+echo "$header" > "$final_file"
+cat tmp/filtered_data/sorted.csv >> "$final_file"
 
 #####################################
 # Si lv all, création du lv_all_minmax.csv et du graphique
@@ -297,7 +308,6 @@ plot "tmp/filtered_data/lv_all_minmax.csv" using 2:xtic(1) title "Capacité (kWh
      "tmp/filtered_data/lv_all_minmax.csv" using 3 title "Consommation (kWh)" lc rgb "orange"
 EOF
 
-    # Appel de GnuPlot
     if command -v gnuplot >/dev/null 2>&1; then
         gnuplot graphs/consumption_stats/plot_script.gnu
     else
@@ -306,9 +316,9 @@ EOF
 fi
 
 #####################################
-# Fin du chronomètre
+# Fin du traitement
 #####################################
 end_time=$(date +%s.%N)
-execution_time=$(echo "$end_time - $start_time" | bc)
+execution_time=$(awk "BEGIN {print $end_time - $process_start_time}")
 echo "Temps d'exécution: ${execution_time}sec"
 exit 0

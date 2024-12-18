@@ -10,5 +10,4 @@ set grid ytics
 set xtics rotate by -45
 set datafile separator ":"
 
-plot "tmp/filtered_data/lv_all_minmax.csv" using 2:xtic(1) title "Capacité (kWh)" lc rgb "blue", \
-     "tmp/filtered_data/lv_all_minmax.csv" using 3 title "Consommation (kWh)" lc rgb "orange"
+plot "tmp/filtered_data/lv_all_minmax.csv" using 2:xtic(1) title "Capacité (kWh)" lc rgb "blue",      "tmp/filtered_data/lv_all_minmax.csv" using 3 title "Consommation (kWh)" lc rgb "orange"
