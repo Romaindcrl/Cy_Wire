@@ -268,14 +268,19 @@ if [ "$station_type" == "lv" ] && [ "$consumer_type" == "all" ]; then
         print $1":"$2":"$3":"diff
     }' "$final_file" > tmp/filtered_data/diff.csv
 
-    # Tri par valeur absolue de la différence
-    head_10=$(sort -t: -k4,4n tmp/filtered_data/diff.csv | head -n 10)
-    tail_10=$(sort -t: -k4,4n tmp/filtered_data/diff.csv | tail -n 10)
+    total_lines=$(wc -l < tmp/filtered_data/diff.csv)
 
-    echo "$head_10" >> "$minmax_file"
-    echo "$tail_10" >> "$minmax_file"
+    if [ $total_lines -ge 20 ]; then
+        head_10=$(sort -t: -k4,4n tmp/filtered_data/diff.csv | head -n 10)
+        tail_10=$(sort -t: -k4,4n tmp/filtered_data/diff.csv | tail -n 10)
+        echo "$head_10" >> "$minmax_file"
+        echo "$tail_10" >> "$minmax_file"
+    else
+        # S'il y a moins de 20 lignes, on affiche simplement tout
+        sort -t: -k4,4n tmp/filtered_data/diff.csv >> "$minmax_file"
+    fi
 
-cat > graphs/consumption_stats/plot_script.gnu << EOF
+    cat > graphs/consumption_stats/plot_script.gnu << EOF
 set terminal png size 1400,800
 set output "graphs/consumption_stats/consumption_graph_lv_all_minmax.png"
 
@@ -299,6 +304,8 @@ EOF
         echo "GnuPlot n'est pas installé. Aucun graphique ne sera généré."
     fi
 fi
+
+
 
 end_time=$(date +%s.%N)
 execution_time=$(awk "BEGIN {print $end_time - $process_start_time}")
