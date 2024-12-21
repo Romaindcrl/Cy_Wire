@@ -1,0 +1,22 @@
+Usage: ./c-wire.sh <chemin_fichier> <type_station> <type_consommateur> [identifiant_centrale] [-h]
+
+Ce script permet de traiter un fichier CSV contenant des données de distribution d'énergie.
+Il filtre puis calcule les consommations associées aux différentes stations (hvb, hva, lv)
+et types de consommateurs (comp, indiv, all), et produit des fichiers CSV ainsi que des graphiques.
+
+Arguments obligatoires:
+  chemin_fichier       : Chemin vers le fichier CSV d'entrée (Ex: input/data.csv)
+  type_station         : hvb, hva, ou lv
+  type_consommateur    : comp, indiv, ou all
+
+Arguments optionnels:
+  identifiant_centrale : Numéro de la centrale à analyser
+  -h                   : Affiche cette aide et ignore les autres paramètres
+
+Règles spécifiques:
+  - hvb ne peut pas être utilisé avec all ou indiv
+  - hva ne peut pas être utilisé avec all ou indiv
+
+Exemples:
+  ./c-wire.sh input/data.csv hvb comp
+  ./c-wire.sh input/data.csv lv all 2
