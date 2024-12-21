@@ -69,6 +69,7 @@ Exécutez le script avec la commande suivante :
 ├── tmp/                 # Données intermédiaires
 ├── graphs/              # Graphiques générés
 ├── codeC/               # Code source et exécutable C
+├── tests/               # Fichier d'entrée de test avec toutes les sorties de test
 ├── c-wire.sh            # Script principal
 └── README.md            # Documentation utilisateur
 ```
