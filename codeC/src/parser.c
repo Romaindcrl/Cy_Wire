@@ -70,6 +70,10 @@ AVLNode *parse_csv_file(const char *filename) {
   int header_processed = 0;
 
   while (fgets(line, sizeof(line), file)) {
+    if (line[0] == '\0' || strcmp(line, "\n") == 0) {
+      // Ligne vide ou juste un saut de ligne, on ignore
+      continue;
+    }
     line_count++;
 
     // Suppression du \n
