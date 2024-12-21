@@ -1,2 +1,5 @@
 *.o
 *.csv
+*.replit
+*.nix
+.ccls-cache
