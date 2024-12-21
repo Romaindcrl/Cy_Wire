@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Chemin vers le fichier de données d'entrée
-INPUT_FILE="input/input.csv"
+INPUT_FILE="input/data.csv"
 
 # Vérification que le fichier d'entrée existe
 if [ ! -f "$INPUT_FILE" ]; then
